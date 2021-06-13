@@ -1,4 +1,7 @@
 import re
+import datetime
+import time
+import sys
 import requests
 from bs4 import BeautifulSoup
 import selenium
@@ -6,6 +9,10 @@ import wikipedia
 import sqlite3
 from contextlib import closing
 from janome.tokenizer import Tokenizer
+from PIL import Image
+import pyocr
+import pyocr.builders
+import alkana.main as alk
 
 
 """
@@ -54,6 +61,7 @@ def search_twitter_trend():
 
 def search_wiki(search_text):
     """
+    TODO : 表記揺れの対策を行う
     https://ja.wikipedia.org/wiki/%E7%89%B9%E5%88%A5:%E3%81%8A%E3%81%BE%E3%81%8B%E3%81%9B%E8%A1%A8%E7%A4%BA
     :param search_text:
     :return:
@@ -65,14 +73,12 @@ def search_wiki(search_text):
 
     if len(search_response) > 0:
         try:
-            wiki_page = wikipedia.page(search_response[0])
-            wiki_content = wiki_page.content
-            # response_string += wiki_content[0:wiki_content.find("。")]
-            # print(response_string)
-            print(wiki_page.title)
-            print(wiki_page.summary)
-            print(wiki_page.url)
-            return wiki_page.summary
+            for res in search_response:
+                wiki_page = wikipedia.page(res)
+                if search_text in wiki_page.title:
+                    return wiki_page.summary
+                time.sleep(1)
+            return None
         except Exception as e:
             print(e)
             return None
@@ -97,21 +103,99 @@ def search_vtuber():
 
 
 def token_analytics(sentences):
+    """
+    文章やリストの中から名詞を返す
+    :param sentences:
+    :return:
+    """
     tokenizer = Tokenizer()
     pattern_noun = re.compile(".*名詞.*")
+    container = []
 
-    for sentence in sentences:
-        for token in tokenizer.tokenize(sentence):
-            if pattern_noun.match(str(token)):
-                print(str(token))
+    if type(sentences) is str:
+        for token in tokenizer.tokenize(sentences):
+            token = str(token)
+            if pattern_noun.match(token):
+                container.append(token[0:token.find("名詞") - 1])
+    if type(sentences) is list:
+        for sentence in sentences:
+            for token in tokenizer.tokenize(sentence):
+                token = str(token)
+                if pattern_noun.match(token):
+                    container.append(token[0:token.find("名詞") - 1])
+
+    return container
 
 
-def controll_db(dbname, query):
+def controll_db(
+        dbname, insert_data,
+        query="insert into twitter_trend(word, summary, insert_date, Nouns) values(?, ?, ?, ?)"
+):
+    """
+        query = "create table nijisanji(word string primary key, summary string, insert_date date)"
+        query = "create table twitter_trend(word string primary key, summary string, insert_date date, nouns string)"
+    :param dbname:
+    :param insert_data:
+    :param query:
+    :return:
+    """
     with closing(sqlite3.connect(dbname)) as conn:
         c = conn.cursor()
-        c.execute(query)
-        conn.commit()
+        check_unique_query = "select word from twitter_trend"
+        inputed_word = c.execute(check_unique_query)
+        flag = False
+        for word in inputed_word:
+            if insert_data[0] in word:
+                flag = True
+        if flag:
+            pass
+        else:
+            c.execute(query, insert_data)
+            conn.commit()
+
+
+def search_db():
+    dbname = TWITTER_TREND_DATA
+    with closing(sqlite3.connect(dbname)) as conn:
+        c = conn.cursor()
+        query = "select * from twitter_trend"
+        data = c.execute(query)
+        for data_ in data:
+            print(data_)
+            nouns = str(token_analytics(data_[0]))
+            query = ""  # TODO
+
+
+def search_summary(search_text):
+    pass
+
+
+# TODO : 画像読み取り
+def read_text():
+    tools = pyocr.get_available_tools()
+    if len(tools) == 0:
+        print("No OCR tool found")
+        sys.exit(1)
+
+    tool = tools[0]
+    print("Will use tool '%s'" % (tool.get_name()))
+
+    txt = tool.image_to_string(
+        # 文字認識対象の画像image.pngを用意する
+        Image.open("./image.png"),
+        lang="jpn",
+        builder=pyocr.builders.TextBuilder(tesseract_layout=6)
+    )
+
+    print(txt)
+
+
+def debug():
+    # trend_words = search_twitter_trend()
+    # for word in trend_words:
+    #     controll_db(TWITTER_TREND_DATA, (word, None, datetime.datetime.today(), None))
+    search_db()
 
 
 if __name__ == '__main__':
-    data = search_twitter_trend()
+    debug()
